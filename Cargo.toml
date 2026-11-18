@@ -3,7 +3,7 @@ name = "sprust"
 version = "0.1.0"
 edition = "2024"
 license-file = "LICENSE"
-decription = "Rust tools for calculations using the Navier-Stokes Equation solver, SPINS, outputs."
+description = "Rust tools for calculations using the Navier-Stokes Equation solver, SPINS, outputs."
 
 [dependencies]
 configparser = { version = "3.3.0" }
