@@ -2,7 +2,6 @@ mod config_read;
 mod files;
 
 use std::collections::HashMap;
-use std::env::var;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Formatter;
@@ -11,8 +10,6 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
 use clap::{Parser, Subcommand};
-use mat5::{DenseMatrix, Values, MatFile, Matrix, NamedArray};
-use matrw::parser::v7::types::subelements::array_name::ArrayNameSmall;
 use ndarray::{Array2, Axis};
 use files::{find_files};
 use crate::config_read::new_ini;
@@ -42,7 +39,9 @@ enum Calculations {
 
 enum Dimension {
     X,
+    #[allow(dead_code)]
     Y,
+    #[allow(dead_code)]
     Z,
 }
 
@@ -115,7 +114,7 @@ fn compute_and_save_mean(
                 Dimension::Z => {Axis(2)}
             };
             let array = Array2::from_shape_vec((nx, nz), floats.to_vec())?
-                .mean_axis(Axis(0)).unwrap();
+                .mean_axis(axis).unwrap();
             let file_name = format!("{file_prefix}.{i}");
             let file = File::create(file_name)?;
             let mut w = BufWriter::new(file);
