@@ -1,0 +1,13 @@
+[package]
+name = "sprust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+configparser = { version = "3.3.0" }
+mat5 = "0.1.0"
+memmap2 = "0.9.12"
+ndarray = "0.17.2"
+bytemuck = "1.25.2"
+clap = { version = "4.6.8", features = ["derive"] }
+matrw = "0.1.4"
