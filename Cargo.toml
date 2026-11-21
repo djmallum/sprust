@@ -11,3 +11,4 @@ memmap2 = "0.9.12"
 ndarray = "0.17.2"
 bytemuck = "1.25.2"
 clap = { version = "4.6.8", features = ["derive"] }
+tempfile = "3.27.0"
