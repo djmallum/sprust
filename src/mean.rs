@@ -34,13 +34,12 @@ impl FileInfo {
             nx: get(config,"Nx").parse()?,
             ny: get(config,"Ny").parse()?,
             nz: get(config,"Nz").parse()?,
-            dimension,
             file_prefix: format!("{file_prefix}_{dimension}_mean"),
         })
     }
 
     pub fn shape(&self) -> (usize, usize, usize) {
-        (self.nx, self.nz, self.ny)
+        (self.nx, self.ny, self.nz)
     }
 
     pub fn prefix(&self) -> &str {
@@ -96,12 +95,11 @@ pub(crate) fn compute_and_save_mean(
 fn read_values_from_file(file_info: &FileInfo, f: &PathBuf) -> Result<Array3<f64>, Box<dyn Error>> {
     let t0 = std::fs::read(&f)?;
     let floats: &[f64] = bytemuck::cast_slice(&t0);
-    let axis = match &file_info.dimension {
-        Dimension::X => { Axis(0) }
-        Dimension::Y => { Axis(1) }
-        Dimension::Z => { Axis(2) }
-    };
-    let array = Array3::from_shape_vec(file_info.shape(), floats.to_vec())?;
+    // TODO this makes no effort to reorganize the file contents.
+    // Need a function that undoes the efforts of tests::to_spins_ordering
+    // perhaps call it undo_spins_ordering
+    let mut array = Array3::from_shape_vec(file_info.shape(), floats.to_vec())?;
+    array.permute_axes([1,2,0]);
     Ok(array)
 }
 
@@ -135,9 +133,10 @@ mod tests {
     use std::error::Error;
     use std::io::Write;
     use std::path::PathBuf;
-
+    use ndarray::{Array3, ShapeBuilder};
     use tempfile;
-    use crate::mean::{compute_and_save_mean, Dimension, read_values_from_file, FileInfo};
+    use tempfile::TempDir;
+    use crate::mean::{compute_and_save_mean, Dimension, read_values_from_file, FileInfo, do_mean};
 
     fn create_fake_config() -> HashMap<String, Option<String>> {
         let mut config = HashMap::new();
@@ -151,7 +150,7 @@ mod tests {
     }
 
     fn write<F: FnOnce() -> Vec<f64>>(path: &PathBuf, f: F) -> Result<(), Box<dyn Error>> {
-        let mut file = std::fs::File::create(&p)?;
+        let mut file = std::fs::File::create(&path)?;
         let values = f();
         for v in &values {
             file.write_all(&v.to_le_bytes())?;
@@ -164,8 +163,8 @@ mod tests {
 
         let file_info = FileInfo::new(&config,Dimension::X,"b").unwrap();
         let array = read_values_from_file(&file_info, &path).unwrap();
-
-        assert!(array.iter().enumerate().all(|(i,v)| *v == i as f64));
+        let array = array.as_standard_layout();
+        insta::assert_yaml_snapshot!(array.as_slice());
     }
 
     #[test]
