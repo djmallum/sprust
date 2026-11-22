@@ -160,24 +160,105 @@ mod tests {
     }
     #[test]
     fn read_to_array() {
-        let config = create_fake_config();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("b.0");
-        let i = 0;
-        let write_foo = || {
-            let length = 3*4*5;
-            let min = i * length;
-            let max = (i + 1) * length;
-            let values : Vec<f64> = (min..max).map(|v| v as f64).collect();
-            values
-        };
+        let (config, path, _dir) = create_fake_file();
 
-        write(&path, write_foo).unwrap();
-
-        let file_info = FileInfo::new(&config,"b").unwrap();
+        let file_info = FileInfo::new(&config,Dimension::X,"b").unwrap();
         let array = read_values_from_file(&file_info, &path).unwrap();
 
         assert!(array.iter().enumerate().all(|(i,v)| *v == i as f64));
+    }
+
+    #[test]
+    fn compute_mean() {
+        let i = 0usize;
+        let nx = 3usize;
+        let ny = 4usize;
+        let nz = 5usize;
+        let length = nx * ny * nz;
+        let min = i * length;
+        let max = (i + 1) * length;
+        let values: Vec<f64> = (min..max).map(|v| v as f64).collect();
+        let array = Array3::from_shape_vec((ny,nz,nx).f(), values).unwrap();
+        let mean_dimension = Dimension::Z;
+
+        let array = do_mean(array, mean_dimension);
+        let as_vec = array.as_slice();
+
+        assert_eq!(array.len(), nx * ny);
+        //assert_eq!(as_vec[])
+    }
+
+    /// This tests the
+    #[test]
+    fn spins_ordering_test() {
+        let nx = 2usize;
+        let ny = 3usize;
+        let nz = 5usize;
+        let write_foo = || {
+            let length = nx * ny * nz;
+
+            let arr = Array3::<f64>::from_shape_fn(
+                (nz, ny, nx),
+                |(z, y, x)| {
+                    (x + nx*y + nx*ny*z) as f64
+                },
+            );
+            let flat = arr.as_slice().unwrap();
+
+            let values = to_spins_ordering((nx, ny, nz), flat);
+            values
+        };
+        let values = write_foo();
+        insta::assert_yaml_snapshot!(values);
+    }
+
+    fn to_spins_ordering((nx,ny,nz): (usize,usize,usize), flat: &[f64]) -> Vec<f64> {
+        let mut values = vec![0.0f64; nx * ny * nz];
+
+        for x in 0..nx {
+            for z in 0..nz {
+                for y in 0..ny {
+                    let xyz_idx =
+                        x +
+                            nx * y +
+                            nx * ny * z;
+
+                    let file_idx =
+                        y +
+                            ny * z +
+                            ny * nz * x;
+
+                    values[file_idx] = flat[xyz_idx];
+                }
+            }
+        }
+        values
+    }
+
+    fn create_fake_file() -> (HashMap<String, Option<String>>, PathBuf, TempDir) {
+        let config = create_fake_config();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("b.0");
+        let nx = 3usize;
+        let ny = 4usize;
+        let nz = 5usize;
+        let write_foo = || {
+            let length = nx * ny * nz;
+            let mut values = Vec::with_capacity(length);
+            for ii in 0..nx {
+                for kk in 0..nz {
+                    for jj in 0 .. ny {
+                        values.push((nx + ny + nz) as f64)
+                    }
+                }
+            }
+            values
+        };
+        let values = write_foo();
+        insta::assert_yaml_snapshot!(values, @"");
+
+        write(&path, write_foo).unwrap();
+        (config, path, dir)
     }
 
     #[test]
