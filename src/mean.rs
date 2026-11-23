@@ -268,4 +268,27 @@ mod tests {
         write(&path, write_foo).unwrap();
         (config, path, dir)
     }
+
+    #[test]
+    fn mean_calculation() {
+        todo!()
+    }
+
+    /// Testing taking the average along the each of the three dimensions
+    #[test]
+    fn dimension_alignment() {
+        todo!()
+    }
+
+    /// Testing 2D mean
+    #[test]
+    fn two_dimensions() {
+        todo!()
+    }
+
+    /// Testing output
+    #[test]
+    fn output() {
+        todo!()
+    }
 }
