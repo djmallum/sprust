@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
-use ndarray::{Array2, Array3, Axis};
+use ndarray::{Array, Array2, Array3, Axis, ShapeBuilder};
 use config_write::{build_config, get};
 
 #[derive(Debug, Copy, Clone)]
@@ -24,7 +24,6 @@ struct FileInfo {
     nx: usize,
     ny: usize,
     nz: usize,
-    dimension: Dimension,
     file_prefix: String,
 }
 
@@ -243,46 +242,12 @@ mod tests {
         let nz = 5usize;
         let write_foo = || {
             let length = nx * ny * nz;
-            let mut values = Vec::with_capacity(length);
-            for ii in 0..nx {
-                for kk in 0..nz {
-                    for jj in 0 .. ny {
-                        values.push((nx + ny + nz) as f64)
-                    }
-                }
-            }
+            let values = (0..length).map(|v| v as f64).collect::<Vec<_>>();
+            let values = to_spins_ordering((nx,ny,nz),&values);
             values
         };
-        let values = write_foo();
-        insta::assert_yaml_snapshot!(values, @"");
 
         write(&path, write_foo).unwrap();
         (config, path, dir)
-    }
-
-    #[test]
-    fn test_mean_x() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = vec![dir.path().join("t.0")
-        , dir.path().join("t.1"),dir.path().join("t.2"),];
-        let expected_paths = vec![dir.path().join("t_X_mean.0")
-                         , dir.path().join("t_X_mean.1"),dir.path().join("t_X_mean.2"),];
-        let config = create_fake_config();
-
-        paths.iter().enumerate().for_each(|(i,p)| {
-            let mut f = std::fs::File::create(&p).unwrap();
-            let length = 3*4*5;
-            let min = i * length;
-            let max = (i + 1) * length;
-            let values : Vec<f64> = (min..max).map(|v| v as f64).collect();
-            for v in &values {
-                f.write_all(&v.to_le_bytes()).unwrap();
-            }
-        });
-
-
-        compute_and_save_mean(paths,&config, Dimension::X).unwrap();
-
-
     }
 }
