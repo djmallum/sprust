@@ -79,9 +79,11 @@ pub(crate) fn compute_and_save_mean(
 
             let array = read_values_from_file(&file_info, f)?;
 
+            let mean_array = do_mean(array, dimension);
+
             let mut writer = MeanWriter::new(file_info.prefix(), i);
 
-            writer.write_mean(array)?;
+            writer.write_mean(mean_array)?;
 
             Ok(())
         })
@@ -89,6 +91,22 @@ pub(crate) fn compute_and_save_mean(
 
     build_config(config,dimension,&file_info.file_prefix)?;
     Ok(())
+}
+
+fn do_mean(array: Array3<f64>, mean_dimension: Dimension) -> Array2<f64> {
+
+    let mean_dimension = match mean_dimension {
+        Dimension::X => 2,
+        Dimension::Y => 0,
+        Dimension::Z => 1,
+    };
+
+    let mean_array = match array.mean_axis(Axis(mean_dimension)) {
+        Some(array) => array,
+        None => panic!("Something went wrong while taking the average...\
+                This is a bug, please report"),
+    };
+    mean_array
 }
 
 fn read_values_from_file(file_info: &FileInfo, f: &PathBuf) -> Result<Array3<f64>, Box<dyn Error>> {
