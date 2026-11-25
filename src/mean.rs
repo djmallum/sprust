@@ -153,7 +153,7 @@ mod tests {
     use ndarray::{Array2, Array3};
     use tempfile;
     use tempfile::TempDir;
-    use crate::mean::{ Dimension, read_values_from_file, FileInfo, do_mean, MeanWriter};
+    use crate::mean::{ Dimension, read_values_from_file, FileInfo, MeanWriter};
 
     fn create_fake_config() -> HashMap<String, Option<String>> {
         let mut config = HashMap::new();
