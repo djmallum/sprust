@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
-use ndarray::{Array, Array2, Array3, Axis, ShapeBuilder};
+use ndarray::{Array2, Array3, Axis};
 use config_write::{build_config, get};
 
 #[derive(Debug, Copy, Clone)]
@@ -96,9 +96,9 @@ pub(crate) fn compute_and_save_mean(
 fn do_mean(array: Array3<f64>, mean_dimension: Dimension) -> Array2<f64> {
 
     let mean_dimension = match mean_dimension {
-        Dimension::X => 2,
-        Dimension::Y => 0,
-        Dimension::Z => 1,
+        Dimension::X => 0,
+        Dimension::Y => 1,
+        Dimension::Z => 2,
     };
 
     let mean_array = match array.mean_axis(Axis(mean_dimension)) {
@@ -150,10 +150,10 @@ mod tests {
     use std::error::Error;
     use std::io::Write;
     use std::path::PathBuf;
-    use ndarray::{Array3, ShapeBuilder};
+    use ndarray::{Array2, Array3};
     use tempfile;
     use tempfile::TempDir;
-    use crate::mean::{compute_and_save_mean, Dimension, read_values_from_file, FileInfo, do_mean};
+    use crate::mean::{ Dimension, read_values_from_file, FileInfo, do_mean, MeanWriter};
 
     fn create_fake_config() -> HashMap<String, Option<String>> {
         let mut config = HashMap::new();
@@ -185,33 +185,11 @@ mod tests {
     }
 
     #[test]
-    fn compute_mean() {
-        let i = 0usize;
-        let nx = 3usize;
-        let ny = 4usize;
-        let nz = 5usize;
-        let length = nx * ny * nz;
-        let min = i * length;
-        let max = (i + 1) * length;
-        let values: Vec<f64> = (min..max).map(|v| v as f64).collect();
-        let array = Array3::from_shape_vec((ny,nz,nx).f(), values).unwrap();
-        let mean_dimension = Dimension::Z;
-
-        let array = do_mean(array, mean_dimension);
-        let as_vec = array.as_slice();
-
-        assert_eq!(array.len(), nx * ny);
-        //assert_eq!(as_vec[])
-    }
-
-    /// This tests the
-    #[test]
     fn spins_ordering_test() {
         let nx = 2usize;
         let ny = 3usize;
         let nz = 5usize;
         let write_foo = || {
-            let length = nx * ny * nz;
 
             let arr = Array3::<f64>::from_shape_fn(
                 (nz, ny, nx),
@@ -269,26 +247,163 @@ mod tests {
         (config, path, dir)
     }
 
-    #[test]
-    fn mean_calculation() {
-        todo!()
-    }
+    mod mean_calculation {
+        use ndarray::{Array2, Array3, Ix2};
+        use crate::mean::{do_mean, Dimension};
 
-    /// Testing taking the average along the each of the three dimensions
-    #[test]
-    fn dimension_alignment() {
-        todo!()
-    }
+        /// Test of a calculation of the mean along the x-axis.
+        ///
+        /// Input array is a*x + b*y + c*z.
+        ///
+        /// The mean along x is
+        ///
+        /// a/nx * \sum_{i=0}^N(x_i) + b*y + c*z
+        #[test]
+        fn x() {
+            let (nx, ny, nz) = (3, 5, 7);
+            let (a, b, c) = (1.0, 2.0, 3.0);
+            let input = Array3::from_shape_fn(
+                (nx, ny, nz),
+                |(x, y, z)| {
+                    a * x as f64 + b * y as f64 + c * z as f64
+                }
+            );
+            let expected = ExpectedBuilder{
+                mean_coeff: a,
+                other_coeff: (b, c),
+                mean_dim_length: nx,
+                other_lengths: (ny, nz),
+            }.get();
 
-    /// Testing 2D mean
-    #[test]
-    fn two_dimensions() {
-        todo!()
+            let dimension = Dimension::X;
+
+            let result = do_mean(input,dimension);
+
+            assert_eq!(expected, result);
+        }
+
+        /// See doc of x(), same logic
+        #[test]
+        fn y() {
+            let (nx, ny, nz) = (3, 5, 7);
+            let (a, b, c) = (1.0, 2.0, 3.0);
+            let input = Array3::from_shape_fn(
+                (nx, ny, nz),
+                |(x, y, z)| {
+                    a * x as f64 + b * y as f64 + c * z as f64
+                }
+            );
+
+            let expected = ExpectedBuilder{
+                mean_coeff: b,
+                other_coeff: (a, c),
+                mean_dim_length: ny,
+                other_lengths: (nx, nz),
+            }.get();
+
+            let dimension = Dimension::Y;
+
+            let result = do_mean(input,dimension);
+
+            assert_eq!(expected, result);
+        }
+
+        /// See doc of x(), same logic
+        #[test]
+        fn z() {
+            let (nx, ny, nz) = (3, 5, 7);
+            let (a, b, c) = (1.0, 2.0, 3.0);
+            let input = Array3::from_shape_fn(
+                (nx, ny, nz),
+                |(x, y, z)| {
+                    a * x as f64 + b * y as f64 + c * z as f64
+                }
+            );
+
+            let expected = ExpectedBuilder{
+                mean_coeff: c,
+                other_coeff: (a, b),
+                mean_dim_length: nz,
+                other_lengths: (nx, ny),
+            }.get();
+
+            let dimension = Dimension::Z;
+
+            let result = do_mean(input,dimension);
+
+            assert_eq!(expected, result);
+        }
+        struct ExpectedBuilder {
+            mean_coeff: f64,
+            other_coeff: (f64,f64),
+            mean_dim_length: usize,
+            other_lengths: (usize,usize),
+        }
+
+        impl ExpectedBuilder {
+            pub fn get(&self) -> Array2<f64> {
+                Array2::from_shape_fn(
+                    self.other_lengths,
+                    |(x, y)| {
+                        let avgd_values = (0..self.mean_dim_length).map(|v| {
+                            let v = v as f64;
+                            self.mean_coeff * v / self.mean_dim_length as f64
+                        }).sum::<f64>();
+                        avgd_values
+                            + (self.other_coeff.0 * x as f64)
+                            + (self.other_coeff.1 * y as f64)
+                    }
+                )
+            }
+        }
+
+        /// Test of a two-dimensional input with a single dimension with length 1
+        ///
+        /// `expected` is built by simply squeezing the input array
+        #[test]
+        fn two_dimensions() {
+            let (nx,ny, nz) = (3, 1, 7);
+            let (a, b, c) = (1.0, 2.0, 3.0);
+            let input = Array3::from_shape_fn(
+                (nx, ny, nz),
+                |(x, y, z)| {
+                    a * x as f64 + b * y as f64 + c * z as f64
+                }
+            );
+
+            let expected = input.clone()
+                .into_dyn()
+                .squeeze()
+                .into_dimensionality::<Ix2>().unwrap();
+
+            let dimension = Dimension::Y;
+
+            let result = do_mean(input,dimension);
+
+            assert_eq!(expected, result);
+        }
     }
 
     /// Testing output
     #[test]
     fn output() {
-        todo!()
+        let (nx, nz) = (3, 7);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a_b");
+        let vec_copy = (0..21).map(|i| i as f64).collect::<Vec<_>>();
+        let mean_array = Array2::from_shape_vec(
+            (nx, nz),
+            vec_copy.clone()
+        ).unwrap();
+        let mut writer = MeanWriter::new(path.to_str().unwrap(), 999);
+        let path = dir.path().join("a_b.999");
+
+        writer.write_mean(mean_array).unwrap();
+
+        assert!(path.exists());
+        let t0 = std::fs::read(&path).unwrap();
+        let floats: &[f64] = bytemuck::cast_slice(&t0);
+
+        insta::assert_yaml_snapshot!(floats);
     }
 }
