@@ -46,14 +46,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         Calculations::Mean { variable, dimension } => {
             let var_name = format!("{}.", variable);
             let files = find_files(&path,&var_name)?;
-            println!("Found {:?} files", files.len());
+            println!("Found {:?} files with prefix {variable}", files.len());
             let dimension = match dimension {
-                Some(d) => d.parse::<Dimension>()?,
-                None => Dimension::X,
+                Some(d) => {
+                    println!("Computing mean along dimension {d}");
+                    d.parse::<Dimension>()?
+                },
+                None => {
+                    println!("Dimension was not specified");
+                    println!("Computing mean along dimension X by default");
+                    Dimension::X
+                },
             };
 
             let config = &config["default"];
-            compute_and_save_mean(files, config, dimension)?;
+            compute_and_save_mean(files, config, dimension, &variable)?;
         }
     }
     Ok(())

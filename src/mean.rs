@@ -6,9 +6,9 @@ use std::fmt;
 use std::fmt::Formatter;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use ndarray::{Array2, Array3, Axis};
+use ndarray::{Array2, Array3, Axis, ShapeBuilder};
 use config_write::{build_config, get};
 
 #[derive(Debug, Copy, Clone)]
@@ -53,7 +53,9 @@ struct MeanWriter {
 impl MeanWriter {
     pub fn new(file_prefix: &str,index: usize) -> Self {
         let file_name = format!("{file_prefix}.{index}");
+        dbg!(&file_name);
         let writer = BufWriter::new(File::create(&file_name).unwrap());
+        dbg!(&writer);
         Self {
             writer,
         }
@@ -70,26 +72,50 @@ pub(crate) fn compute_and_save_mean(
     files: Vec<PathBuf>,
     config: &HashMap<String, Option<String>>,
     dimension: Dimension,
+    file_prefix: &str,
 ) -> Result<(), Box<dyn Error>> {
+    let first_file = files.first().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "cannot compute means without input files",
+        )
+    })?;
 
-    let file_info = FileInfo::new(config, dimension, "t")?;
+    let output_dir = first_file.parent().unwrap_or_else(|| Path::new("."));
+    let file_info = FileInfo::new(config, dimension, file_prefix)?;
+    let output_prefix = output_dir.join(file_info.prefix());
+    let output_prefix = output_prefix.to_string_lossy();
 
     files.iter().enumerate()
-        .map(|(i, f)| {
-
-            let array = read_values_from_file(&file_info, f)?;
-
+        .map(|(i, file)| {
+            let array = read_values_from_file(&file_info, file)?;
             let mean_array = do_mean(array, dimension);
 
-            let mut writer = MeanWriter::new(file_info.prefix(), i);
-
+            let mut writer = MeanWriter::new(output_prefix.as_ref(), i);
             writer.write_mean(mean_array)?;
 
             Ok(())
         })
         .collect::<Result<(), Box<dyn Error>>>()?;
 
-    build_config(config,dimension,&file_info.file_prefix)?;
+    build_config(config, dimension, output_prefix.as_ref())?;
+    //let file_info = FileInfo::new(config, dimension, file_prefix)?;
+
+    //files.iter().enumerate()
+    //    .map(|(i, f)| {
+
+    //        let array = read_values_from_file(&file_info, f)?;
+
+    //        let mean_array = do_mean(array, dimension);
+
+    //        let mut writer = MeanWriter::new(file_info.prefix(), i);
+    //        writer.write_mean(mean_array)?;
+
+    //        Ok(())
+    //    })
+    //    .collect::<Result<(), Box<dyn Error>>>()?;
+
+    //build_config(config,dimension,&file_info.file_prefix)?;
     Ok(())
 }
 
@@ -115,8 +141,9 @@ fn read_values_from_file(file_info: &FileInfo, f: &PathBuf) -> Result<Array3<f64
     // TODO this makes no effort to reorganize the file contents.
     // Need a function that undoes the efforts of tests::to_spins_ordering
     // perhaps call it undo_spins_ordering
-    let mut array = Array3::from_shape_vec(file_info.shape(), floats.to_vec())?;
-    array.permute_axes([1,2,0]);
+    let (nx, ny, nz) = file_info.shape();
+    let mut array = Array3::from_shape_vec((ny,nz,nx).f(), floats.to_vec())?;
+    array.permute_axes([2,0,1]);
     Ok(array)
 }
 
@@ -149,11 +176,10 @@ mod tests {
     use std::collections::HashMap;
     use std::error::Error;
     use std::io::Write;
-    use std::path::PathBuf;
+    use std::path::{PathBuf};
     use ndarray::{Array2, Array3};
     use tempfile;
-    use tempfile::TempDir;
-    use crate::mean::{ Dimension, read_values_from_file, FileInfo, MeanWriter};
+    use crate::mean::{Dimension, read_values_from_file, FileInfo, MeanWriter, compute_and_save_mean};
 
     fn create_fake_config() -> HashMap<String, Option<String>> {
         let mut config = HashMap::new();
@@ -173,15 +199,6 @@ mod tests {
             file.write_all(&v.to_le_bytes())?;
         }
         Ok(())
-    }
-    #[test]
-    fn read_to_array() {
-        let (config, path, _dir) = create_fake_file();
-
-        let file_info = FileInfo::new(&config,Dimension::X,"b").unwrap();
-        let array = read_values_from_file(&file_info, &path).unwrap();
-        let array = array.as_standard_layout();
-        insta::assert_yaml_snapshot!(array.as_slice());
     }
 
     #[test]
@@ -227,24 +244,6 @@ mod tests {
             }
         }
         values
-    }
-
-    fn create_fake_file() -> (HashMap<String, Option<String>>, PathBuf, TempDir) {
-        let config = create_fake_config();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("b.0");
-        let nx = 3usize;
-        let ny = 4usize;
-        let nz = 5usize;
-        let write_foo = || {
-            let length = nx * ny * nz;
-            let values = (0..length).map(|v| v as f64).collect::<Vec<_>>();
-            let values = to_spins_ordering((nx,ny,nz),&values);
-            values
-        };
-
-        write(&path, write_foo).unwrap();
-        (config, path, dir)
     }
 
     mod mean_calculation {
@@ -405,5 +404,84 @@ mod tests {
         let floats: &[f64] = bytemuck::cast_slice(&t0);
 
         insta::assert_yaml_snapshot!(floats);
+    }
+
+    fn encoded(x: usize, y: usize, z: usize) -> f64 {
+        (100 * x + 10 * y + z) as f64
+    }
+
+    // MATLAB memmapfile Format [Ny, Nz, Nx]:
+    // y varies fastest, then z, then x.
+    fn spins_values(nx: usize, ny: usize, nz: usize) -> Vec<f64> {
+        (0..nx)
+            .flat_map(|x| {
+                (0..nz).flat_map(move |z| {
+                    (0..ny).map(move |y| encoded(x, y, z))
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn read_to_array_preserves_coordinates() {
+        let (nx, ny, nz) = (3, 4, 5);
+        let config = create_fake_config();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("b.0");
+
+        write(&path, || spins_values(nx, ny, nz)).unwrap();
+
+        let file_info = FileInfo::new(&config, Dimension::X, "b").unwrap();
+        let array = read_values_from_file(&file_info, &path).unwrap();
+
+        assert_eq!(array.shape(), &[nx, ny, nz]);
+        for x in 0..nx {
+            for y in 0..ny {
+                for z in 0..nz {
+                    assert_eq!(
+                        array[[x, y, z]],
+                        encoded(x, y, z),
+                        "wrong value at ({x}, {y}, {z})"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn compute_mean_and_save() {
+        let config = create_fake_config();
+        let dir = tempfile::tempdir().unwrap();
+        let paths = vec![dir.path().join("b.0"), dir.path().join("b.1")
+            , dir.path().join("b.2"), dir.path().join("b.3")
+            , dir.path().join("b.4"), dir.path().join("b.5")];
+
+        let nx: usize = config.get("Nx").unwrap().as_ref().unwrap().parse().unwrap();
+        let ny: usize = config.get("Ny").unwrap().as_ref().unwrap().parse().unwrap();
+        let nz: usize = config.get("Nz").unwrap().as_ref().unwrap().parse().unwrap();
+
+        paths.iter().for_each(|path| {
+            write(&path, || spins_values(nx, ny, nz)).unwrap();
+        });
+
+        compute_and_save_mean(paths,&config,Dimension::Y,"b").unwrap();
+
+        let expected_paths = vec![dir.path().join("b_Y_mean.0"), dir.path().join("b_Y_mean.1"),
+            dir.path().join("b_Y_mean.2"), dir.path().join("b_Y_mean.3"), dir.path().join("b_Y_mean.4"),
+            dir.path().join("b_Y_mean.5")];
+
+        let expected_len = (nx * nz * size_of::<f64>()) as u64;
+
+        expected_paths.iter().for_each(|path| {
+            assert!(path.exists(), "expected output file to exist: {}", path.display());
+
+            let actual_len = std::fs::metadata(path).unwrap().len();
+            assert_eq!(
+                actual_len,
+                expected_len,
+                "unexpected file length for {}",
+                path.display()
+            );
+        });
+
     }
 }
