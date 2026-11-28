@@ -1,6 +1,6 @@
 /target
-t.*
-t_*
+[a-z].*
+[a-z]_[A-Z]_mean.*
 *~
 .idea/
 spins.conf
